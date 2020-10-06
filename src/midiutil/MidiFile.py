@@ -33,6 +33,23 @@ FLATS = -1
 
 __all__ = ['MIDIFile', 'MAJOR', 'MINOR', 'SHARPS', 'FLATS']
 
+# Thaats and named pitches of Hindustani Music
+
+thaats = {
+    "asavari":  [0,2,3,5,7,8,10],
+    "bhairav":  [0,1,4,5,7,8,11],
+    "bhairavi": [0,1,3,5,7,8,10],
+    "bilawal":  [0,2,4,5,7,9,11],
+    "kafi":     [0,2,3,5,7,9,10],
+    "kalyan":   [0,2,4,6,7,9,11],
+    "khamaj":   [0,2,4,5,7,9,10],
+    "marwa":    [0,1,4,6,7,9,11],
+    "purvi":    [0,1,4,6,7,8,11],
+    "todi":     [0,1,3,6,7,8,11]
+}
+
+base_surs = ["सा","रे","ग","म","प","ध","नि"]
+variations = {"ऱे":1,"ग़":3,"म़":6,"मं":6,"ध़":8,"ऩि":10}
 
 class GenericEvent(object):
     '''
@@ -632,6 +649,167 @@ class TimeSignature(GenericEvent):
         midibytes += struct.pack('>B', self.notes_per_quarter)
         return midibytes
 
+class ContinuePreviousSwar():
+    def __init__(self): pass
+    def __str__ (self): return "-"
+
+class EmptySwar():
+    def __init__ (self): pass
+    def __str__ (self): return ","
+
+class SwarBar():
+    '''
+    A class that encapsulate divisions of a SwarlipiSequence
+    '''
+    def __init__ (self, beats=0, notesequence= []):
+        self.notesequence = notesequence
+        self.beats = beats
+
+    def addNote (self,note):
+        self.notesequence.append(note)
+
+    def __len__(self):
+        return len(self.notesequence)
+
+    def generate_notes (self,time=0):
+        """
+        Returns a list of tuples with integer values for pitch relative to base sa,
+        the time of the notes, and the duration of the notes
+        """
+        notes = []
+        extend = 0
+        interval = self.beats/self.__len__()
+
+        for note in self.notesequence:
+            if type(note) == SwarBar:
+                note.beats = interval
+                sub_notes, ext = note.generate_notes(time=time)
+                if extend > 0 and len(notes) > 0: 
+                    notes[-1]["duration"] += ext
+                elif extend > 0: extend += ext
+                notes += sub_notes
+
+            elif type(note) == ContinuePreviousSwar:
+                if len(notes) > 0:
+                    notes[-1]["interval"] += interval
+                else:
+                    extend = interval
+            elif type(note) == int:
+                notes.append({"note":note,"time":time,"duration":interval})
+            time += interval
+
+        return (notes,extend)
+
+    def __str__ (self):
+        string = ""
+        for note in self.notesequence:
+            if type(note) == SwarBar: string += "(" + str(note) + ") "
+            else: string += str(note) + " "
+        return string[:-1]
+
+
+class SwarlipiSequence ():
+    '''
+    A class that encapsulates a Hindustani Music Swarlipi Sequence
+    '''
+    def __init__ (self, bpb, sequence, thaat):
+        self.beatsperbar = bpb
+        self.bars = self.parse(sequence,thaat)
+
+    def generate_notes(self):
+        """
+        Returns a list of tuples with integer values for pitch relative to base sa,
+        and the duration of the notes
+        """
+        notes = []
+        time = 0
+        for bar in self.bars:
+            barnotes, extend = bar.generate_notes(time)
+            if extend > 0 and len(notes) > 0: 
+                notes[-1]["duration"] += extend
+            elif extend > 0: raise ValueError("Can not have - as first sur") 
+            notes += barnotes
+            time += self.beatsperbar
+        for i in notes: print(i)
+        return notes
+
+    def __str__ (self):
+        string = ""
+        for bar in self.bars:
+            string += str(bar) + " | "
+        return string[:-3]
+
+    def parse(self, sequence, thaat):
+        """
+        Parses a Swarlipi Sequence into a sequence of SwarBarObjects
+        """
+        i = 0
+        bars = []
+        last_bar = SwarBar(self.beatsperbar,[])
+        last_note = None
+        last_offset = 0
+
+        def newnote (note):
+            nonlocal last_note, last_bar, last_offset
+            if last_note is not None and type(last_note) == int:
+                last_bar.addNote(last_note+last_offset)
+                last_offset = 0
+
+            elif last_note is not None:
+                last_bar.addNote(last_note)
+            
+            last_note = note
+
+        def endbar ():
+            nonlocal last_note, last_bar
+            if last_note is not None: newnote(None)
+            if len(last_bar) > 0:
+                bars.append(last_bar)
+                last_bar = SwarBar(self.beatsperbar,[])
+                last_offset = 0
+                last_note = None
+
+        while i < len(sequence):
+            cont = False
+            for variation in variations:
+                if sequence[i:i+len(variation)] == variation:
+                    newnote(variations[variation])
+                    i += len(variation)
+                    cont = True
+            if cont: continue
+
+            for sur in range(len(base_surs)):
+                if sequence[i:i+len(base_surs[sur])] == base_surs[sur]:
+                    newnote(thaat[sur])
+                    i += len(base_surs[sur])
+                    cont = True
+            if cont: continue
+
+            if sequence[i] == "." and last_note == None:
+                last_offset -= 12
+            elif sequence[i] == ".":
+                last_offset += 12
+            elif sequence[i] == "-":
+                newnote(ContinuePreviousSwar())
+            elif sequence[i] == ",":
+                newnote(EmptySwar())
+            elif sequence[i] == "।" or sequence == "|":
+                endbar()
+            elif sequence[i] == " ":
+                newnote(None)
+            elif sequence[i] == "(":
+                end_paren = sequence.find(")",i)
+                if end_paren == -1:
+                    raise ValueError("Swarlipi String does not have ) for corresponding (")
+                bar = self.parse(sequence[i+1:end_paren],thaat)
+                if len(bar) > 0: newnote(bar[0])
+                i = end_paren
+
+            i += 1
+
+        endbar()
+        return bars
+
 
 class MIDITrack(object):
     '''
@@ -981,6 +1159,7 @@ class MIDIFile(object):
     proper and well-formed MIDI file.
     '''
 
+
     def __init__(self, numTracks=1, removeDuplicates=True, deinterleave=True,
                  adjust_origin=False, file_format=1,
                  ticks_per_quarternote=TICKSPERQUARTERNOTE, eventtime_is_ticks=False):
@@ -1107,6 +1286,37 @@ class MIDIFile(object):
                                            volume, annotation=annotation,
                                            insertion_order=self.event_counter)
         self.event_counter += 1
+
+    def addSwarLipi (self, track, channel, basepitch, time, beatsperbar, volume,
+            sequence, thaat = thaats["bilawal"]):
+        """
+        Add SwarLipi Sequence to the the MIDIFile Object
+
+        :param track: The track to which the note is added.
+        :param channel: the MIDI channel to assign to the note. [Integer, 0-15]
+        :param basepitch: the MIDI pitch number for base सा in the sequence [Integer, 0-127].
+        :param time: the time at which the first note in the sequence sounds. The value can be either
+            quarter notes [Float], or ticks [Integer]. Ticks may be specified by
+            passing eventtime_is_ticks=True to the MIDIFile constructor.
+            The default is quarter notes.
+        :param beatsperbar: the duration of each division in the Swarlipi sequence,
+            as separated by the character ।. Like the time argument, the
+            value can be either quarter notes [Float], or ticks [Integer].
+        :param volume: the volume (velocity) of the notes. [Integer, 0-127].
+        :param sequence: The String sequence in devanagari swarlipi. Use ऱ, ग़, ध़, ऩि for komal notes,
+            and म़ or मं for the teevra म note. Separate these swars into "beats" by using the devanagari
+            full stop character ।For lower of higher octaves use the Roman period character . before or
+            after the notes, सा. is sa of the higher octave, .सा is sa of the lower octave
+        :param thaat: The thaat profile to use to interpret notes without diacritics. For example, passing
+            thaats["asavari"] here would interpret any "ग" notes in the sequence as komal, since ga is komal
+            in the raags of the asavari thaat. By default they are all interpreted normally, so the "bilawal
+            thaat" is used
+        """
+        seq = SwarlipiSequence(beatsperbar,sequence,thaat)
+        print(seq)
+        for notedict in seq.generate_notes():
+            self.addNote(track, channel, basepitch + notedict["note"], 
+                notedict["time"], notedict["duration"], volume)
 
     def addTrackName(self, track, time, trackName):
         """
