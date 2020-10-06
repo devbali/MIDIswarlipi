@@ -730,7 +730,6 @@ class SwarlipiSequence ():
             elif extend > 0: raise ValueError("Can not have - as first sur") 
             notes += barnotes
             time += self.beatsperbar
-        for i in notes: print(i)
         return notes
 
     def __str__ (self):
@@ -1313,7 +1312,6 @@ class MIDIFile(object):
             thaat" is used
         """
         seq = SwarlipiSequence(beatsperbar,sequence,thaat)
-        print(seq)
         for notedict in seq.generate_notes():
             self.addNote(track, channel, basepitch + notedict["note"], 
                 notedict["time"], notedict["duration"], volume)
