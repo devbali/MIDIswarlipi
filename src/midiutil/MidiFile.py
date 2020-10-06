@@ -691,7 +691,7 @@ class SwarBar():
 
             elif type(note) == ContinuePreviousSwar:
                 if len(notes) > 0:
-                    notes[-1]["interval"] += interval
+                    notes[-1]["duration"] += interval
                 else:
                     extend = interval
             elif type(note) == int:
