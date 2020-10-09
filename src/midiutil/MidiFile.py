@@ -792,7 +792,7 @@ class SwarlipiSequence ():
                 newnote(ContinuePreviousSwar())
             elif sequence[i] == ",":
                 newnote(EmptySwar())
-            elif sequence[i] == "।" or sequence == "|":
+            elif sequence[i] == "।" or sequence[i] == "|":
                 endbar()
             elif sequence[i] == " ":
                 newnote(None)
@@ -1315,6 +1315,7 @@ class MIDIFile(object):
         for notedict in seq.generate_notes():
             self.addNote(track, channel, basepitch + notedict["note"], 
                 notedict["time"], notedict["duration"], volume)
+        return seq
 
     def addTrackName(self, track, time, trackName):
         """
